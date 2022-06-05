@@ -1,0 +1,141 @@
+#Include "Libs/EscapeMania/ModeLibs/EscapeMania/Rooms/RoomsRequestRespawn.Script.txt" as RoomsRequestRespawn
+
+#Include "Libs/EscapeMania/ModeLibs/EscapeMania/Items/Items.Script.txt" as Items
+#Include "Libs/Zrx/ModeLibs/Common/VirtualPickups/VirtualPickups.Script.txt" as VirtualPickups
+
+
+#Const C_EntranceLandmarkTag "ControlRoom_Entrance"
+#Const C_KeyLandmarkTag "ControlRoom_Success"
+
+declare Boolean G_IsGateLocked;
+declare Boolean G_IsComplete;
+
+Boolean HasPickedUpBadge() {
+	foreach (Pickup in VirtualPickups::GetAll()) {
+		if (Items::IsBadgeItem(Pickup)) {
+			return !VirtualPickups::IsOnLandmark(Pickup);
+		}
+	}
+	return False;
+}
+
+Boolean HasPickedUpKey() {
+	foreach (Pickup in VirtualPickups::GetAll()) {
+		if (Items::IsKeyItem(Pickup)) {
+			return !VirtualPickups::IsOnLandmark(Pickup);
+		}
+	}
+	return False;
+}
+
+Text[] GetHints() {
+	declare Text[] Hints;
+	if (G_IsComplete) {
+		return Hints;
+	}
+
+	Hints.add("The next puzzle you want to solve is the control room.");
+
+	if (!HasPickedUpBadge()) {
+		Hints.add("You need to pick up the badge item at the top of the dirt hill in the letters area!");
+	}
+	if (!HasPickedUpKey()) {
+		Hints.add("You need to pick up the key item at the top of the dirt hill in the letters area!");
+	}
+	
+	if (G_IsGateLocked) {
+		Hints.add("How can you open the gate to the control room?");
+		Hints.add("Have the player that holds the badge item go through the blue checkpoint!");
+	}
+	Hints.add("At the top of the control room, there's a slot for someone...");
+	Hints.add("Have the player that holds the key item go through the slot at the top of the control room!");
+	Hints.add("<END>");
+
+	return Hints;
+}
+
+Void CompleteBadge() {
+	G_IsGateLocked = False;
+	UIManager.UIAll.QueueMessage(1000, 1, CUIConfig::EMessageDisplay::Big, "$2f0");
+}
+
+Void ResetBadge() {
+	G_IsGateLocked = True;
+}
+
+Void ResetPuzzle() {
+	G_IsComplete = False;
+	
+	foreach (Player in Players) {
+		SetPlayer_Delayed_GravityCoef(Player, 1.0);
+	}
+}
+
+Void OnEntrance(CSmPlayer Player) {
+	if (G_IsGateLocked) {
+		foreach (Pickup in VirtualPickups::GetByPlayer(Player)) {
+			if (Items::IsBadgeItem(Pickup)) {
+				CompleteBadge();
+				break;
+			}
+		}
+	}
+
+	if (G_IsGateLocked) {
+		declare UI = UIManager.GetUI(Player);
+		UI.QueueMessage(1000, 1, CUIConfig::EMessageDisplay::Big, "$f20");
+		RoomsRequestRespawn::RequestRespawn(Player);
+	}
+}
+
+Void CompletePuzzle() {
+	G_IsComplete = True;
+	foreach (Player in Players) {
+		SetPlayer_Delayed_GravityCoef(Player, 0.3);
+		declare UI = UIManager.GetUI(Player);
+		UI.QueueMessage(1000, 1, CUIConfig::EMessageDisplay::Big, "");
+	}
+}
+
+Void OnPlayerSpawn(CSmPlayer Player) {
+	if (G_IsComplete) {
+		SetPlayer_Delayed_GravityCoef(Player, 0.3);
+	}
+}
+
+Void OnKey(CSmPlayer Player) {
+	if (G_IsComplete) {
+		return;
+	}
+	
+	foreach (Pickup in VirtualPickups::GetByPlayer(Player)) {
+		if (Items::IsKeyItem(Pickup)) {
+			CompletePuzzle();
+			break;
+		}
+	}
+	
+	if (!G_IsComplete) {
+		declare UI = UIManager.GetUI(Player);
+		UI.QueueMessage(1000, 1, CUIConfig::EMessageDisplay::Big, "");
+	}
+}
+
+Void Init() {
+	G_IsGateLocked = True;
+	G_IsComplete = False;
+}
+
+Void Loop() {
+	foreach (Event in PendingEvents) {
+		switch (Event.Type) {
+			case CSmModeEvent::EType::OnPlayerTriggersWaypoint: {
+				if (Event.Landmark.Tag == C_EntranceLandmarkTag) {
+					OnEntrance(Event.Player);
+				} else if (Event.Landmark.Tag == C_KeyLandmarkTag) {
+					OnKey(Event.Player);
+				}
+			}
+		}
+	}
+}

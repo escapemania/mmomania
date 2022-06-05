@@ -1,0 +1,94 @@
+#Include "Libs/EscapeMania/ModeLibs/EscapeMania/Rooms/RoomsRequestRespawn.Script.txt" as RoomsRequestRespawn
+#Include "Libs/EscapeMania/ModeLibs/EscapeMania/MediaTracker/MediaTracker.Script.txt" as MediaTracker
+
+#Const C_LoopTriggerTag "LoopTrigger"
+#Const C_MediaTrackerClipPrefix "Wall "
+#Const C_DeathTriggerTag "EnergyWallDeathTrigger"
+#Const C_MediaTrackerPriority 1
+
+#Include "TextLib" as TL
+
+declare Integer G_WallState;
+
+Void Init() {
+	G_WallState = 10;
+}
+
+Text[] GetHints() {
+	declare Text[] Hints;
+	if (G_WallState == 0) {
+		return Hints;
+	}
+
+	Hints.add("The next puzzle you want to solve is the wall with red and blue triangles.");
+	if (G_WallState == 10) {
+		Hints.add("Did you notice that someone's head is spinning... Where can you spin?");
+		Hints.add("You need to spin around the holes with a red booster.");
+	} else {
+		Hints.add("Did you see an  pop up in your screen? Have you checked the wall with red and blue triangles.");
+		Hints.add("When you do a spin around the holes with a red booster, it lowers the wall by one block each time.");
+		Hints.add("Spin around the holes with a red booster " ^ (G_WallState - 1) ^ " more times!");
+	}
+	Hints.add("<END>");
+
+	return Hints;
+}
+
+Void OnPlayerSpawn(CSmPlayer Player) {
+	MediaTracker::SetMediaTracker(Player, C_MediaTrackerClipPrefix ^ G_WallState, C_MediaTrackerPriority);
+}
+
+Void ResetPuzzle() {
+	G_WallState = 10;
+	foreach (Player in Players) {
+		MediaTracker::SetMediaTracker(Player, C_MediaTrackerClipPrefix ^ G_WallState, C_MediaTrackerPriority);
+	}
+}
+
+Void CompletePuzzle() {
+	G_WallState = 0;
+	foreach (Player in Players) {
+		MediaTracker::SetMediaTracker(Player, C_MediaTrackerClipPrefix ^ G_WallState, C_MediaTrackerPriority);
+		declare UI = UIManager.GetUI(Player);
+		UI.QueueMessage(1000, 1, CUIConfig::EMessageDisplay::Big, "");
+	}
+}
+
+Void OnRespawn(CSmPlayer Player) {
+	if (G_WallState == 0) {
+		MediaTracker::UnsetMediaTracker(Player, C_MediaTrackerPriority);
+	}
+}
+
+Void LowerWall() {
+	if (G_WallState > 0) {
+		G_WallState -= 1;
+
+		if (G_WallState == 1) {
+			CompletePuzzle();
+			return;
+		}
+
+		if (G_WallState > 0) {
+			foreach (Player in Players) {
+				MediaTracker::SetMediaTracker(Player, C_MediaTrackerClipPrefix ^ G_WallState, C_MediaTrackerPriority);
+				declare UI = UIManager.GetUI(Player);
+				UI.QueueMessage(1000, 1, CUIConfig::EMessageDisplay::Big, "");
+			}
+		}
+	}
+}
+
+Void Loop() {
+	foreach (Event in PendingEvents) {
+		switch (Event.Type) {
+			case CSmModeEvent::EType::OnPlayerTriggersWaypoint: {
+				if (Event.Landmark.Tag == C_LoopTriggerTag) {
+					LowerWall();
+				} else if (Event.Landmark.Tag == C_DeathTriggerTag && G_WallState > 1) {
+					RoomsRequestRespawn::RequestRespawn(Event.Player);
+				}
+			}
+		}
+	}
+}

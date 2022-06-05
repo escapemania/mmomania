@@ -1,0 +1,162 @@
+#Include "Libs/Zrx/ModeLibs/Common/VirtualPickups/VirtualPickups.Script.txt" as VirtualPickups
+#Include "Libs/EscapeMania/ModeLibs/EscapeMania/Items/Items.Script.txt" as Items
+#Include "Libs/EscapeMania/ModeLibs/EscapeMania/Simon/Simon.Script.txt" as Simon
+
+#Include "TextLib" as TL
+
+#Const C_LetterLandmarkTagPrefix "Pipe_Letter"
+#Const C_PipeLandmarkTagPrefix "Pipe_Drop"
+#Const C_PipeSuccessLandmarkTagPrefix "Pipe_Drop_Letter_"
+#Const C_PipeItemLandmarkTag "Pipe_Drop_Item"
+
+#Const C_DropULandmarkTag "Pipe_Drop_Letter_U"
+#Const C_DropILandmarkTag "Pipe_Drop_Letter_I"
+#Const C_DropLLandmarkTag "Pipe_Drop_Letter_L"
+#Const C_DropNLandmarkTag "Pipe_Drop_Letter_N"
+
+declare Boolean G_IsComplete;
+
+Text FirstMissingLetter() {
+	foreach (Landmark in MapLandmarks) {
+		if (TL::StartsWith(C_PipeSuccessLandmarkTagPrefix, Landmark.Tag)) {
+			declare VirtualPickups::K_VirtualPickup[] LandmarkPickups = VirtualPickups::GetByLandmark(Landmark);
+			if (
+				LandmarkPickups.count == 0 ||
+				Landmark.Tag == C_DropULandmarkTag && !Items::IsLetterUItem(LandmarkPickups[0]) ||
+				Landmark.Tag == C_DropILandmarkTag && !Items::IsLetterIItem(LandmarkPickups[0]) ||
+				Landmark.Tag == C_DropLLandmarkTag && !Items::IsLetterLItem(LandmarkPickups[0]) ||
+				Landmark.Tag == C_DropNLandmarkTag && !Items::IsLetterNItem(LandmarkPickups[0])
+			) {
+				if (Landmark.Tag == C_DropULandmarkTag) return "U";
+				if (Landmark.Tag == C_DropILandmarkTag) return "I";
+				if (Landmark.Tag == C_DropLLandmarkTag) return "L";
+				if (Landmark.Tag == C_DropNLandmarkTag) return "N";
+			}
+		}
+	}
+	return "";
+}
+
+Boolean IsPuzzleComplete() {
+	foreach (Pickup in VirtualPickups::GetAll()) {
+		if (Items::IsPowerSourceItem(Pickup)) {
+			return True;
+		}
+	}
+
+	return FirstMissingLetter() == "";
+}
+
+Text[] GetHints() {
+	declare Text[] Hints;
+	if (IsPuzzleComplete()) {
+		return Hints;
+	}
+
+	Hints.add("The next puzzle you want to solve is the red pipes on the wall.");
+	Hints.add("Did you find the items with letters U, I, L, N?");
+	Hints.add("How could the letters be used on the wall with pipes?");
+	Hints.add("Do you see a path from Green to Red?");
+	Hints.add("You need to place the letters corresponding to the missing pipes.");
+
+	switch (FirstMissingLetter()) {
+		case "U": Hints.add("You need to place the letter U in the 5th slot from the left!");
+		case "I": Hints.add("You need to place the letter I in the 7th slot from the left!");
+		case "L": Hints.add("You need to place the letter L in the 3th slot from the left!");
+		case "N": Hints.add("You need to place the letter N in the 4th slot from the left!");
+	}
+	Hints.add("<END>");
+
+	return Hints;
+}
+
+Void ResetPuzzle() {
+	// Destroy Letter Items & Power Source Items
+	foreach (Pickup in VirtualPickups::GetAll()) {
+		if (Items::IsLetterItem(Pickup) || Items::IsPowerSourceItem(Pickup)) {
+			VirtualPickups::Destroy(Pickup.Id);
+		}
+	}
+	
+	Simon::CreateItems();
+}
+
+Void CompletePuzzle() {
+	// Destroy Letter Items & Power Source Items
+	foreach (Pickup in VirtualPickups::GetAll()) {
+		if (Items::IsLetterItem(Pickup) || Items::IsPowerSourceItem(Pickup)) {
+			VirtualPickups::Destroy(Pickup.Id);
+		}
+	}
+	
+	// Create Power Source Items
+	foreach (Landmark in MapLandmarks) {
+		if (Landmark.Tag == C_PipeItemLandmarkTag) {
+			Items::CreatePowerSourceItem(Landmark);
+		}
+	}
+	
+	// Tell all the players something happened!
+	foreach (Player in Players) {
+		declare UI = UIManager.GetUI(Player);
+		UI.QueueMessage(1000, 1, CUIConfig::EMessageDisplay::Big, "");
+	}
+}
+
+Void Loop() {
+	foreach (Event in PendingEvents) {
+		switch (Event.Type) {
+			case CSmModeEvent::EType::OnPlayerTriggersWaypoint: {
+				if (
+					TL::StartsWith(C_PipeLandmarkTagPrefix, Event.Landmark.Tag) ||
+					TL::StartsWith(C_LetterLandmarkTagPrefix, Event.Landmark.Tag)
+				) {
+					// Pickup
+					declare VirtualPickups::K_VirtualPickup[] LandmarkPickups = VirtualPickups::GetByLandmark(Event.Landmark);
+					if (LandmarkPickups.count > 0) {
+						declare VirtualPickups::K_VirtualPickup Pickup = LandmarkPickups[0];
+						if (Items::IsLetterItem(Pickup)) {
+							// You can only have one item of this type
+							declare Boolean AlreadyHasItem = False;
+							foreach (Pickup in VirtualPickups::GetByPlayer(Event.Player)) {
+								if (Items::IsLetterItem(Pickup)) {
+									AlreadyHasItem = True;
+									break;
+								}	
+							}
+							if (!AlreadyHasItem) {
+								VirtualPickups::SetPlayer(Pickup.Id, Event.Player);					
+							}
+						}
+						if (Items::IsPowerSourceItem(Pickup)) {
+							// You can only have one item of this type
+							declare Boolean AlreadyHasItem = False;
+							foreach (Pickup in VirtualPickups::GetByPlayer(Event.Player)) {
+								if (Items::IsPowerSourceItem(Pickup)) {
+									AlreadyHasItem = True;
+									break;
+								}	
+							}
+							if (!AlreadyHasItem) {
+								VirtualPickups::SetPlayer(Pickup.Id, Event.Player);					
+							}
+						}
+						
+					// Dropoff
+					} else if (TL::StartsWith(C_PipeLandmarkTagPrefix, Event.Landmark.Tag)) {
+						foreach (Pickup in VirtualPickups::GetByPlayer(Event.Player)) {
+							if (Items::IsLetterItem(Pickup)) {
+								VirtualPickups::SetLandmark(Pickup.Id, Event.Landmark);
+								
+								if (IsPuzzleComplete()) {
+									CompletePuzzle();
+								}
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

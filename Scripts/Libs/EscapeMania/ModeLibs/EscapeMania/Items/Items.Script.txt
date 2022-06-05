@@ -1,0 +1,255 @@
+// #RequireContext CSmMode
+
+#Include "Libs/Zrx/ModeLibs/Common/VirtualPickups/VirtualPickups.Script.txt" as VirtualPickups
+#Include "Libs/Zrx/ModeLibs/Common/VirtualPickups/Inventory.Script.txt" as Inventory
+
+#Const C_ItemType "ItemType"
+
+#Const C_OrbItemType "Orb"
+#Const C_OrbItemIcon "https://cdn.discordapp.com/attachments/929103899137310810/973034869439479888/x_item.png"
+#Const C_HelmetItemType "Helmet"
+#Const C_HelmetItemIcon "https://cdn.discordapp.com/attachments/929103899137310810/977318149403836566/helmet_item.png"
+#Const C_LetterU_ItemType "LetterU"
+#Const C_LetterU_ItemIcon "https://cdn.discordapp.com/attachments/929103899137310810/977341199046299668/letter_U_item.png"
+#Const C_LetterI_ItemType "LetterI"
+#Const C_LetterI_ItemIcon "https://cdn.discordapp.com/attachments/929103899137310810/977341199289548830/letter_I_item.png"
+#Const C_LetterL_ItemType "LetterL"
+#Const C_LetterL_ItemIcon "https://cdn.discordapp.com/attachments/929103899137310810/977341199503487016/letter_L_item.png"
+#Const C_LetterN_ItemType "LetterN"
+#Const C_LetterN_ItemIcon "https://cdn.discordapp.com/attachments/929103899137310810/977341199725760523/letter_N_item.png"
+#Const C_PowerSourceItemType "PowerSource"
+#Const C_PowerSourceItemIcon "https://cdn.discordapp.com/attachments/929103899137310810/977363945834831913/powersource_item.png"
+#Const C_BottleItemType "Bottle"
+#Const C_BottleItemIcon "https://cdn.discordapp.com/attachments/929103899137310810/977637638574075985/bottle_item.png"
+#Const C_KeyItemType "Key"
+#Const C_KeyItemIcon "https://cdn.discordapp.com/attachments/929103899137310810/977724464211066970/key_item.png"
+#Const C_BadgeItemType "Badge"
+#Const C_BadgeItemIcon "https://cdn.discordapp.com/attachments/929103899137310810/977724464412368926/badge_item.png"
+
+#Const C_LayerName_Items "ItemsLayer"
+
+declare Integer G_Item_Count;
+
+Void CreateItem(CNod Landmark, Text Type, Text NameFR, Text NameEN, Text DescriptionFR, Text DescriptionEN, Text Icon) {
+	G_Item_Count += 1;
+	
+	declare Text PickupId = Type ^ G_Item_Count;
+	VirtualPickups::Create(PickupId);
+	switchtype (Landmark) {
+		case CSmPlayer: VirtualPickups::SetPlayer(PickupId, (Landmark as CSmPlayer));
+		case CMapLandmark: VirtualPickups::SetLandmark(PickupId, (Landmark as CMapLandmark));
+	}
+	VirtualPickups::SetCustomDataText(PickupId, C_ItemType, Type);
+
+	declare Text LayerName = C_LayerName_Items ^ G_Item_Count;
+
+	declare VirtualPickups::K_MarkerConfig MarkerConfig = VirtualPickups::DefaultMarkerConfig();
+	MarkerConfig.HudVisibility = CUIConfigMarker::EHudVisibility::WhenVisible;
+	MarkerConfig.ImageUrl = Icon;
+	
+	VirtualPickups::SetMarkerConfig(PickupId, MarkerConfig);
+	VirtualPickups::SetCustomDataText(PickupId, Inventory::C_PickupCustomDataKey_ImageUrl, Icon);
+	VirtualPickups::SetCustomDataText(PickupId, Inventory::C_PickupCustomDataKey_NameFR, NameFR);
+	VirtualPickups::SetCustomDataText(PickupId, Inventory::C_PickupCustomDataKey_NameEN, NameEN);
+	VirtualPickups::SetCustomDataText(PickupId, Inventory::C_PickupCustomDataKey_DescriptionFR, DescriptionFR);	
+	VirtualPickups::SetCustomDataText(PickupId, Inventory::C_PickupCustomDataKey_DescriptionEN, DescriptionEN);	
+}
+
+Text GetPickupType(VirtualPickups::K_VirtualPickup Pickup) {
+	return Pickup.CustomData.TextData.get(C_ItemType, "");
+}
+
+Void Init() {
+	UIManager.UIAll.LabelsVisibility = CUIConfig::EHudVisibility::Everything;
+	G_Item_Count = 0;
+}
+
+Text GetManialink() {
+	return """
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<manialink version="3" name="Items_Preload">
+	<quad size="1 1" image="{{{C_OrbItemIcon}}}" pos="1001 1" />
+	<quad size="1 1" image="{{{C_HelmetItemIcon}}}" pos="1002 2" />
+	<quad size="1 1" image="{{{C_LetterU_ItemIcon}}}" pos="1003 3" />
+	<quad size="1 1" image="{{{C_LetterI_ItemIcon}}}" pos="1004 4" />
+	<quad size="1 1" image="{{{C_LetterL_ItemIcon}}}" pos="1005 5" />
+	<quad size="1 1" image="{{{C_LetterN_ItemIcon}}}" pos="1006 6" />
+	<quad size="1 1" image="{{{C_PowerSourceItemIcon}}}" pos="1007 7" />
+	<quad size="1 1" image="{{{C_BottleItemIcon}}}" pos="1008 8" />
+	<quad size="1 1" image="{{{C_KeyItemIcon}}}" pos="1009 9" />
+	<quad size="1 1" image="{{{C_BadgeItemIcon}}}" pos="10010 10" />
+</manialink>
+	""";
+}
+
+// ---------
+
+Void CreateOrbItem(CNod Landmark) {
+	CreateItem(
+		Landmark,
+		C_OrbItemType,
+		"Boule de Feu",
+		"Glowing Orb",
+		"Etrangement attirée par des cerceaux tournants...",
+		"It is attracted to round moving objects...",
+		C_OrbItemIcon
+	);
+}
+
+Boolean IsOrbItem(VirtualPickups::K_VirtualPickup Pickup) {
+	return GetPickupType(Pickup) == C_OrbItemType;
+}
+
+Void CreateHelmetItem(CNod Landmark) {
+	CreateItem(
+		Landmark,
+		C_HelmetItemType,
+		"Casque de Respiration",
+		"Water Breathing Helmet",
+		"Ce casque magique vous permet de respirer sous l'eau lorsqu'il est alimenté par une source d'énergie bleue.",
+		"This strange helmet lets you breath under water when powered by a blue power source.",
+		C_HelmetItemIcon
+	);
+}
+
+Boolean IsHelmetItem(VirtualPickups::K_VirtualPickup Pickup) {
+	return GetPickupType(Pickup) == C_HelmetItemType;
+}
+
+
+Void CreateLetterUItem(CNod Landmark) {
+	CreateItem(
+		Landmark,
+		C_LetterU_ItemType,
+		"Tuyau en U",
+		"U Pipe",
+		"Un gros tuyau qui ressemble à la lettre U.",
+		"A thick U-shaped piece of pipe.",
+		C_LetterU_ItemIcon
+	);
+}
+
+Boolean IsLetterUItem(VirtualPickups::K_VirtualPickup Pickup) {
+	return GetPickupType(Pickup) == C_LetterU_ItemType;
+}
+
+Void CreateLetterIItem(CNod Landmark) {
+	CreateItem(
+		Landmark,
+		C_LetterI_ItemType,
+		"Tuyau en U",
+		"I Pipe",
+		"Un gros tuyau qui ressemble à la lettre I.",
+		"A thick I-shaped piece of pipe.",
+		C_LetterI_ItemIcon
+	);
+}
+
+Boolean IsLetterIItem(VirtualPickups::K_VirtualPickup Pickup) {
+	return GetPickupType(Pickup) == C_LetterI_ItemType;
+}
+
+Void CreateLetterLItem(CNod Landmark) {
+	CreateItem(
+		Landmark,
+		C_LetterL_ItemType,
+		"Tuyau en L",
+		"L Pipe",
+		"Un gros tuyau qui ressemble à la lettre L.",
+		"A thick L-shaped piece of pipe.",
+		C_LetterL_ItemIcon
+	);
+}
+
+Boolean IsLetterLItem(VirtualPickups::K_VirtualPickup Pickup) {
+	return GetPickupType(Pickup) == C_LetterL_ItemType;
+}
+
+Void CreateLetterNItem(CNod Landmark) {
+	CreateItem(
+		Landmark,
+		C_LetterN_ItemType,
+		"Tuyau en N",
+		"N Pipe",
+		"Un gros tuyau qui ressemble à la lettre N.",
+		"A thick N-shaped piece of pipe.",
+		C_LetterN_ItemIcon
+	);
+}
+
+Boolean IsLetterNItem(VirtualPickups::K_VirtualPickup Pickup) {
+	return GetPickupType(Pickup) == C_LetterN_ItemType;
+}
+
+Boolean IsLetterItem(VirtualPickups::K_VirtualPickup Pickup) {
+	return (
+		IsLetterUItem(Pickup) ||
+		IsLetterIItem(Pickup) ||
+		IsLetterLItem(Pickup) ||
+		IsLetterNItem(Pickup)
+	);
+}
+
+Void CreatePowerSourceItem(CNod Landmark) {
+	CreateItem(
+		Landmark,
+		C_PowerSourceItemType,
+		"Source d'Energie Bleue",
+		"Blue Power Source",
+		"Cette source d'énergie bleue active les pouvoirs d'objets magiques.",
+		"This blue power source activates magical objects.",
+		C_PowerSourceItemIcon
+	);
+}
+
+Boolean IsPowerSourceItem(VirtualPickups::K_VirtualPickup Pickup) {
+	return GetPickupType(Pickup) == C_PowerSourceItemType;
+}
+
+Void CreateBottleItem(CNod Landmark) {
+	CreateItem(
+		Landmark,
+		C_BottleItemType,
+		"Bouteille à la Mer",
+		"Message in a Bottle",
+		"Les boules doivent être placées\ndans la pénombre\nen ligne droite\npour que les coins se rejoignent\n      -- Capitaine",
+		"The orbs must be placed\nwhere darkness lies\nin straight lines\nfor corners to meet\n      -- Captain",
+		C_BottleItemIcon
+	);
+}
+
+Boolean IsBottleItem(VirtualPickups::K_VirtualPickup Pickup) {
+	return GetPickupType(Pickup) == C_BottleItemType;
+}
+
+Void CreateKeyItem(CNod Landmark) {
+	CreateItem(
+		Landmark,
+		C_KeyItemType,
+		"Clé Rouge",
+		"Red Key",
+		"Cette clé permet d'arrêter ce vaisseau dans la salle de contrôle. Quand le vaisseau est arrêté, le système qui génère une gravité terriène ne fonctionne plus.",
+		"Use this key in the control room to stop the ship. When the ship is stopped, the mechanism that enables earth-like gravity movement no longer works!",
+		C_KeyItemIcon
+	);
+}
+
+Boolean IsKeyItem(VirtualPickups::K_VirtualPickup Pickup) {
+	return GetPickupType(Pickup) == C_KeyItemType;
+}
+
+Void CreateBadgeItem(CNod Landmark) {
+	CreateItem(
+		Landmark,
+		C_BadgeItemType,
+		"Brouilleur",
+		"Badge Jammer",
+		"Ce brouilleur fait malfonctionner les contrôles d'accès.",
+		"This badge jams access control mechanisms it encounters.",
+		C_BadgeItemIcon
+	);
+}
+
+Boolean IsBadgeItem(VirtualPickups::K_VirtualPickup Pickup) {
+	return GetPickupType(Pickup) == C_BadgeItemType;
+}

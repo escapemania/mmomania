@@ -1,0 +1,127 @@
+#Include "Libs/EscapeMania/ModeLibs/EscapeMania/Rooms/RoomsRequestRespawn.Script.txt" as RoomsRequestRespawn
+#Include "Libs/EscapeMania/ModeLibs/EscapeMania/MediaTracker/MediaTracker.Script.txt" as MediaTracker
+
+#Const C_EntranceLandmarkTag "Challenge_Start"
+#Const C_SpawnLandmarkTag "Challenge_Spawn"
+#Const C_EndLandmarkTag "Challenge_End"
+#Const C_MediaTrackerObserver "Challenge Cam"
+#Const C_MediaTrackerPlayer "Challenge Blindfold"
+#Const C_MediaTrackerPriority 5
+
+declare Text G_CurrentPlayerLogin;
+declare Boolean G_IsComplete;
+declare CMapLandmark G_SpawnLocation;
+declare Boolean G_HasEnteredOnce;
+
+Text[] GetHints() {
+	declare Text[] Hints;
+	if (G_IsComplete) {
+		return Hints;
+	}
+
+	Hints.add("The next puzzle you want to solve is the place with the security camera.");
+	if (!G_HasEnteredOnce) {
+		Hints.add("You need to find the entrance.");
+		Hints.add("The entrance is on the wall forward towards the right of the small slope!");
+	}
+	Hints.add("You need to go through the challenge guided by your friends!");
+	Hints.add("<END>");
+
+	return Hints;
+}
+
+Void ResetMediaTrackers() {
+	foreach (Player in Players) {
+		MediaTracker::UnsetMediaTracker(Player, C_MediaTrackerPriority);
+	}
+}
+
+Void ResetPuzzle() {
+	G_IsComplete = False;
+	ResetMediaTrackers();
+}
+
+Void CompletePuzzle() {
+	ResetMediaTrackers();
+	G_CurrentPlayerLogin = "";
+	if (!G_IsComplete) {
+		UIManager.UIAll.QueueMessage(1000, 1, CUIConfig::EMessageDisplay::Big, "");
+	}
+	G_IsComplete = True;
+}
+
+Void OnEnd(CSmPlayer Player) {
+	ResetMediaTrackers();
+	CompletePuzzle();
+}
+
+Void OnLeave() {
+	G_CurrentPlayerLogin = "";
+	ResetMediaTrackers();
+}
+
+Void OnPlayerLeave(CUser User) {
+	if (G_CurrentPlayerLogin == User.Login) {
+		OnLeave();
+	}
+}
+
+Void OnEntrance(CSmPlayer Player) {
+	if (G_IsComplete) {
+		return;
+	}
+	if (G_CurrentPlayerLogin == Player.User.Login) {
+		OnLeave();
+		return;
+	}
+
+	if (G_CurrentPlayerLogin != "") {
+		RoomsRequestRespawn::RequestRespawn(Player);
+		declare UI = UIManager.GetUI(Player);
+		UI.QueueMessage(3000, 1, CUIConfig::EMessageDisplay::Big, " ");
+		return;
+	}
+
+	G_HasEnteredOnce = True;
+	G_CurrentPlayerLogin = Player.User.Login;
+	RoomsRequestRespawn::RequestRespawnAtLocation(Player, G_SpawnLocation);
+	MediaTracker::SetMediaTracker(Player, C_MediaTrackerPlayer, C_MediaTrackerPriority);
+	foreach (OtherPlayer in Players) {
+		if (OtherPlayer != Player) {
+			RoomsRequestRespawn::RequestRespawn(OtherPlayer);
+			MediaTracker::SetMediaTracker(OtherPlayer, C_MediaTrackerObserver, C_MediaTrackerPriority);
+		}
+	}
+}
+
+Void OnRespawn(CSmPlayer Player, CMapLandmark Location) {
+	if (Player.User.Login == G_CurrentPlayerLogin && Location != G_SpawnLocation) {
+		OnLeave();
+	}
+}
+
+Void Init() {
+	G_CurrentPlayerLogin = "";
+	G_IsComplete = False;
+	G_HasEnteredOnce = False;
+	
+	foreach (Landmark in MapLandmarks) {
+		if (Landmark.Tag == C_SpawnLandmarkTag) {
+			G_SpawnLocation = Landmark;
+		}
+	}
+}
+
+Void Loop() {
+	foreach (Event in PendingEvents) {
+		switch (Event.Type) {
+			case CSmModeEvent::EType::OnPlayerTriggersWaypoint: {
+				if (Event.Landmark.Tag == C_EntranceLandmarkTag) {
+					OnEntrance(Event.Player);
+				} else if (Event.Landmark.Tag == C_EndLandmarkTag) {
+					OnEnd(Event.Player);
+				}
+			}
+		}
+	}
+}
