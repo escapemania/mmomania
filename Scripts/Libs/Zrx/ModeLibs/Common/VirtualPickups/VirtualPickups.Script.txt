@@ -1,0 +1,632 @@
+/**
+ * Library to manage pickup items.
+ * These items don't really exist in the gameworld, but instead are just data that is assigned to locations with automatically managed markers ("virtual").
+ * These items can be set on players, landmarks, positions or unspawned.
+ *
+ * Usage:
+ * - Create items using Create() with a self defined, unique(!) Id.
+ * - Use SetPlayer(), SetLandmark(), SetPosition() and SetUnspawned, with the respective Id of the Pickup and a target to put it to the wanted location.
+ * - Destry items using Destroy() or DestroyAll().
+ * - Change the marker appearance by providing a marker config.
+ *   - Marker instances are managed automatically.
+ *   - Obtain a default configuration using DefaultMarkerConfig(), change it to your liking and provide it using SetMarkerConfig().
+ *   - DefaultMarkerConfig() return a config struct which corresponds to the settable fields of a default CUIConfigMarker.
+ * - Attach and remove custom data using SetCustomData<Type> and RemoveCustomData<Type>
+ *   - Available Types: All simple types and CNod
+ * - Retrieve a Pickup using the provided getter functions.
+ * - Call Update() in the Match_Yield label to update the library.
+ *
+ * Notes:
+ * - Functions that return a Pickup return a struct, meaning any changes to that struct will not be reflected in the library.
+ * - To change the content of a pickup use the respective setter functions.
+ */
+
+// #RequireContext CSmMode
+
+#Include "TextLib" as TL
+
+#Const C_Position_Invalid <-1., -1., -1.>
+#Const C_Error_IdNotFound "No VirtualPickup with Id \"{Id}\" found"
+
+#Struct K_MarkerConfig {
+	Boolean IsTurning;
+	Boolean ShowArmor;
+	Text Label;
+	Vec3 Box;
+	Text Icon;
+	Vec3 Color;
+	Text ImageUrl;
+	Text ManialinkFrameId;
+	Real DistMin;
+	Real DistMax;
+	CUIConfigMarker::EMiniMapVisibility MiniMapVisibility;
+	CUIConfigMarker::EHudVisibility HudVisibility;
+	Boolean HideOnSelf;
+	Real Gauge;
+}
+
+#Struct K_Player {
+	Text Login;
+	Ident ObjectId;
+}
+
+#Struct K_CustomData {
+	Text[Text] TextData;
+	Boolean[Text] BooleanData;
+	Integer[Text] IntegerData;
+	Real[Text] RealData;
+	Int2[Text] Int2Data;
+	Int3[Text] Int3Data;
+	Vec2[Text] Vec2Data;
+	Vec3[Text] Vec3Data;
+	Ident[Text] IdentData;
+	CNod[Text] NodData;
+}
+
+#Struct K_VirtualPickup {
+	Text Id;
+	Vec3 Position;
+	K_Player Player;
+	CMapLandmark Landmark;
+	K_MarkerConfig MarkerConfig;	// Marker config as struct (Reason: Sometimes an item may temporarily exist without an actual marker)
+	K_CustomData CustomData;			// Arbitrary Data to be applied to an pickup for different usecases
+}
+
+declare K_VirtualPickup[Text] G_Pickups; // PickupId -> Pickup
+declare CUIConfigMarker[Text] G_Markers; // PickupId -> Marker, Id might be valid in but without entry in Markers
+
+/**
+ * FOR INTERNAL USE ONLY.
+ * Copies over all configuration from the Source Marker to the target Marker.
+ */
+ Void Private_ApplyMarkerConfig(Text Id) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+
+	declare CUIConfigMarker Marker = G_Markers.get(Id, Null);
+	if(Marker != Null) {
+		declare K_MarkerConfig Config = G_Pickups[Id].MarkerConfig;
+		Marker.IsTurning = Config.IsTurning;
+		Marker.ShowArmor = Config.ShowArmor;
+		Marker.Label = Config.Label;
+		Marker.Box = Config.Box;
+		Marker.Icon = Config.Icon;
+		Marker.Color = Config.Color;
+		Marker.ImageUrl = Config.ImageUrl;
+		Marker.ManialinkFrameId = Config.ManialinkFrameId;
+		Marker.DistMin = Config.DistMin;
+		Marker.DistMax = Config.DistMax;
+		Marker.MiniMapVisibility = Config.MiniMapVisibility;
+		Marker.HudVisibility = Config.HudVisibility;
+		Marker.HideOnSelf = Config.HideOnSelf;
+		Marker.Gauge = Config.Gauge;
+
+		if (G_Pickups[Id].Player.Login != "") {
+			Marker.HudVisibility = CUIConfigMarker::EHudVisibility::Never;
+		}
+	}
+}
+
+/**
+ * FOR INTERNAL USE ONLY.
+ * Removes the marker for the given Pickup from all UIs.
+ */
+Void Private_RemoveMarker(Text Id) {
+	if (!G_Markers.existskey(Id)) return;
+
+	declare CUIConfigMarker MarkerToRemove = G_Markers[Id];
+
+	// Cannot remove marker from UIManager.UIAll in certain situations; Will crash the script
+	foreach (UI in UIManager.UI) {
+		// Cannot use UI.Markers.remove(MarkerToRemove) because of the way UIAll references are handled in the engine
+		foreach (Marker in UI.Markers) {
+			if (Marker.Id == MarkerToRemove.Id) {
+				UI.RemoveMarker(Marker);
+				break;
+			}
+		}
+	}
+
+	G_Markers.removekey(Id);
+}
+
+/**
+ * FOR INTERNAL USE ONLY.
+ * Replaces the marker for the given Pickup from all UIs.
+ */
+Void Private_ReplaceMarker(Text Id, CUIConfigMarker Marker) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+
+	Private_RemoveMarker(Id);
+	G_Markers[Id] = Marker;
+	Private_ApplyMarkerConfig(Id);
+}
+
+/**
+ * Returns a default marker config corresponding to CUIConfig::AddMarker.
+ */
+K_MarkerConfig DefaultMarkerConfig() {
+	return K_MarkerConfig {
+		IsTurning = False,
+		ShowArmor = False,
+		Label = "",
+		Box = <-1., -1., -1.>,
+		Icon = "",
+		Color = <-1., -1., -1.>,
+		ImageUrl = "",
+		ManialinkFrameId = "",
+		DistMin = -1.,
+		DistMax = -1.,
+		MiniMapVisibility = CUIConfigMarker::EMiniMapVisibility::Never,
+		HudVisibility = CUIConfigMarker::EHudVisibility::Never,
+		HideOnSelf = False,
+		Gauge = -1.
+	};
+}
+
+/**
+ * Checks wether a Pickup with given Id exists.
+ */
+Boolean Exists(Text Id) {
+	return G_Pickups.existskey(Id);
+}
+
+/**
+ * Creates a Pickup with the given Id.
+ * Throws an Error if Id is Blank or already present.
+ */
+ K_VirtualPickup Create(Text Id) {
+	assert(TL::Trim(Id) != "", "Id can't be blank"); // Because this can be annoying for debugging
+	assert(!G_Pickups.existskey(Id), """Pickup with Id "{{{Id}}}" already present""");
+	declare K_VirtualPickup Pickup = K_VirtualPickup{
+		Id = Id,
+		Position = C_Position_Invalid,
+		MarkerConfig = DefaultMarkerConfig()
+	};
+	G_Pickups[Id] = Pickup;
+	return Pickup;
+}
+
+/**
+ * Returns if a given Pickup is held by a player.
+ */
+Boolean IsOnPlayer(K_VirtualPickup Pickup) {
+	return Pickup.Player.Login != "";
+}
+
+/**
+ * Returns if a given Pickup with the given Id is held by a player.
+ */
+Boolean IsOnPlayer(Text Id) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	return IsOnPlayer(G_Pickups[Id]);
+}
+
+/**
+ * Returns if a given Pickup is on a Landmark.
+ */
+ Boolean IsOnLandmark(K_VirtualPickup Pickup) {
+	return Pickup.Landmark != Null;
+}
+
+/**
+ * Returns if a given Pickup with the given Id is on a Landmark.
+ */
+Boolean IsOnLandmark(Text Id) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	return IsOnLandmark(G_Pickups[Id]);
+}
+
+/**
+ * Returns if a given Pickup is in a dropped state.
+ */
+Boolean IsDropped(K_VirtualPickup Pickup) {
+	return Pickup.Landmark == Null && Pickup.Player.Login == "" && Pickup.Position != C_Position_Invalid;
+}
+
+/**
+ * Returns if the Pickup with the given Id is in a dropped state.
+ * Throws an error if there is no entry with the given Id.
+ */
+Boolean IsDropped(Text Id) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	return IsDropped(G_Pickups[Id]);
+}
+
+/**
+ * Returns if a given Pickup is in an unspawned state.
+ */
+Boolean IsUnspawned(K_VirtualPickup Pickup) {
+	return Pickup.Landmark == Null && Pickup.Player.Login == "" && Pickup.Position == C_Position_Invalid;
+}
+
+/**
+ * Returns if a Pickup with the given Id is in an unspawned state.
+ * Throws an error if there is no entry with the given Id.
+ */
+Boolean IsUnspawned(Text Id) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	return IsUnspawned(G_Pickups[Id]);
+}
+
+/**
+ * Gets the Pickup for the given Id.
+ * Due to how structs work, the returned value is NOT a reference.
+ * Throws an error if there is no entry with the given Id.
+ */
+K_VirtualPickup Get(Text Id) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	return G_Pickups[Id];
+}
+
+/**
+ * Gets all currently registered Pickups as immutable array.
+ * Due to how structs work, the returned values are NOT references.
+ */
+K_VirtualPickup[Text] GetAll() {
+	return G_Pickups;
+}
+
+K_VirtualPickup[] GetByPlayer(Text Login) {
+	declare K_VirtualPickup[] Pickups;
+	foreach (Pickup in G_Pickups) {
+		if (Pickup.Player.Login == Login) Pickups.add(Pickup);
+	}
+	return Pickups;
+}
+
+/**
+ * Get all Pickups that are held by the given Player.
+ * If no player is provided (Null), all pickups that are not held by any player are returned.
+ * Due to how structs work, the returned values are NOT references.
+ */
+K_VirtualPickup[] GetByPlayer(CSmPlayer Player) {
+	declare Text PlayerLogin = "";
+	if (Player != Null) PlayerLogin = Player.User.Login;
+	return GetByPlayer(PlayerLogin);
+}
+
+/**
+ * Get all Pickups that held by a Landmark.
+ * If no landmark is provided (Null), all pickups that are not held by any landmark are returned.
+ * Due to how structs work, the returned values are NOT references.
+ */
+K_VirtualPickup[] GetByLandmark(CMapLandmark Landmark) {
+	declare K_VirtualPickup[] Pickups;
+	foreach (Pickup in G_Pickups) {
+		if(Pickup.Landmark == Landmark) Pickups.add(Pickup);
+	}
+	return Pickups;
+}
+
+/**
+ * Get all Pickups that are in an unspawned state.
+ * Due to how structs work, the returned values are NOT references.
+ */
+K_VirtualPickup[] GetUnspawned() {
+	declare K_VirtualPickup[] Pickups;
+	foreach (Pickup in G_Pickups) {
+		if(IsUnspawned(Pickup)) Pickups.add(Pickup);
+	}
+	return Pickups;
+}
+
+/**
+ * Get all Pickups that are in a dropped state.
+ * Due to how structs work, the returned values are NOT references.
+ */
+ K_VirtualPickup[] GetDropped() {
+	declare K_VirtualPickup[] Pickups;
+	foreach (Pickup in G_Pickups) {
+		if(IsDropped(Pickup)) Pickups.add(Pickup);
+	}
+	return Pickups;
+}
+
+/**
+ * Removes the given Pickup and destroys it's marker.
+ */
+Void Destroy(Text Id) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	Private_RemoveMarker(Id);
+	G_Pickups.removekey(Id);
+}
+
+/**
+ * Removes all pickups and destroys their markers.
+ */
+Void DestroyAll() {
+	foreach (Id => Pickup in G_Pickups) {
+			Private_RemoveMarker(Id);
+	}
+	G_Pickups.clear();
+}
+
+/**
+ * Sets the position of the pickup with the given Id.
+ * If the pickup was set on a player or a landmark, Player and Landmark will be set to Null(Id).
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetPosition(Text Id, Vec3 Position) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+
+	G_Pickups[Id].Position = Position;
+	G_Pickups[Id].Player = K_Player{};
+	G_Pickups[Id].Landmark = Null;
+
+	// Recreate Marker
+	declare CUIConfigMarker Marker = UIManager.UIAll.AddMarker(Position);
+	Private_ReplaceMarker(Id, Marker);
+}
+
+/**
+ * Sets the Player of the pickup with the given Id.
+ * Also set the Position to the current position of the Player.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetPlayer(Text Id, CSmPlayer Player) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+
+	if (Player.User.Login == G_Pickups[Id].Player.Login) return;
+
+	// Update Pickup
+	G_Pickups[Id].Player = K_Player{ Login = Player.User.Login, ObjectId = Player.Id };
+	G_Pickups[Id].Position = Player.Position;
+	G_Pickups[Id].Landmark = Null;
+
+	// Recreate Marker
+	declare CUIConfigMarker Marker = UIManager.UIAll.AddMarker(Player);
+	Private_ReplaceMarker(Id, Marker);
+}
+
+/**
+ * Sets the Landmark of the pickup with the given Id.
+ * Also set the Position to the current position of the Landmark.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetLandmark(Text Id, CMapLandmark Landmark) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+
+	if (Landmark == G_Pickups[Id].Landmark) return;
+
+	// Update Pickup
+	G_Pickups[Id].Position = Landmark.Position;
+	G_Pickups[Id].Landmark = Landmark;
+	G_Pickups[Id].Player = K_Player{};
+
+	// Recreate Marker
+	declare CUIConfigMarker Marker = UIManager.UIAll.AddMarker(Landmark);
+	Private_ReplaceMarker(Id, Marker);
+}
+
+/**
+ * Sets the pickup to an unspawned state.
+ * This will set the position to <-1., -1., -1.> destroy the marker.
+ */
+Void SetUnspawned(Text Id) {
+	SetPosition(Id, C_Position_Invalid);
+	Private_RemoveMarker(Id);
+}
+
+/**
+ * Sets and applies a marker config for the pickup with the given id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetMarkerConfig(Text Id, K_MarkerConfig Config) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].MarkerConfig = Config;
+	Private_ApplyMarkerConfig(Id);
+}
+
+/**
+ * Updates the library.
+ * Should be called every yield (Match_Yield) in the main mode.
+ */
+ Void Update() {
+	foreach (Event in PendingEvents) {
+		switch (Event.Type) {
+			case CSmModeEvent::EType::OnPlayerAdded: {
+				declare K_VirtualPickup[] Pickups = GetByPlayer(Event.Player.User.Login);
+				foreach (Pickup in Pickups) {
+					G_Pickups[Pickup.Id].Player.ObjectId = Event.Player.Id;
+					declare CUIConfigMarker Marker = UIManager.UIAll.AddMarker(Event.Player);
+					Private_ReplaceMarker(Pickup.Id, Marker);
+				}
+			}
+			case CSmModeEvent::EType::OnPlayerRemoved: {
+				declare K_VirtualPickup[] Pickups = GetByPlayer(Event.User.Login);
+				foreach (Pickup in Pickups) {
+					G_Pickups[Pickup.Id].Player.ObjectId = NullId;
+				}
+			}
+		}
+	}
+
+	// Update positions for Pickups held by players
+	foreach (Id => Pickup in G_Pickups) {
+		if (Pickup.Player.Login != "" && Players.existskey(Pickup.Player.ObjectId)) {
+			G_Pickups[Id].Position = Players[Pickup.Player.ObjectId].Position;
+		}
+	}
+}
+
+// CUSTOM DATA SET AND REMOVE
+
+/**
+ * Sets a custom data Text with given Key and Data for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetCustomDataText(Text Id, Text Key, Text Data) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.TextData[Key] = Data;
+}
+
+/**
+ * Removes a custom data Text with given Key for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void RemoveCustomDataText(Text Id, Text Key) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.TextData.removekey(Key);
+}
+
+/**
+ * Sets a custom data Boolean with given Key and Data for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetCustomDataBoolean(Text Id, Text Key, Boolean Data) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.BooleanData[Key] = Data;
+}
+
+/**
+ * Removes a custom data Boolean with given Key for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void RemoveCustomDataBoolean(Text Id, Text Key) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.BooleanData.removekey(Key);
+}
+
+/**
+ * Sets a custom data Integer with given Key and Data for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetCustomDataInteger(Text Id, Text Key, Integer Data) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.IntegerData[Key] = Data;
+}
+
+/**
+ * Removes a custom data Integer with given Key for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void RemoveCustomDataInteger(Text Id, Text Key) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.IntegerData.removekey(Key);
+}
+
+/**
+ * Sets a custom data Real with given Key and Data for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetCustomDataReal(Text Id, Text Key, Real Data) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.RealData[Key] = Data;
+}
+
+/**
+ * Removes a custom data Real with given Key for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void RemoveCustomDataReal(Text Id, Text Key) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.RealData.removekey(Key);
+}
+
+/**
+ * Sets a custom data Int2 with given Key and Data for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetCustomDataInt2(Text Id, Text Key, Int2 Data) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.Int2Data[Key] = Data;
+}
+
+/**
+ * Removes a custom data Int2 with given Key for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void RemoveCustomDataInt2(Text Id, Text Key) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.Int2Data.removekey(Key);
+}
+
+/**
+ * Sets a custom data Int3 with given Key and Data for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetCustomDataInt3(Text Id, Text Key, Int3 Data) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.Int3Data[Key] = Data;
+}
+
+/**
+ * Removes a custom data Int3 with given Key for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void RemoveCustomDataInt3(Text Id, Text Key) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.Int3Data.removekey(Key);
+}
+
+/**
+ * Sets a custom data Vec2 with given Key and Data for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetCustomDataVec2(Text Id, Text Key, Vec2 Data) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.Vec2Data[Key] = Data;
+}
+
+/**
+ * Removes a custom data Vec2 with given Key for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void RemoveCustomDataVec2(Text Id, Text Key) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.Vec2Data.removekey(Key);
+}
+
+/**
+ * Sets a custom data Vec3 with given Key and Data for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetCustomDataVec3(Text Id, Text Key, Vec3 Data) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.Vec3Data[Key] = Data;
+}
+
+/**
+ * Removes a custom data Vec3 with given Key for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void RemoveCustomDataVec3(Text Id, Text Key) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.Vec3Data.removekey(Key);
+}
+
+/**
+ * Sets a custom data Ident with given Key and Data for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetCustomDataIdent(Text Id, Text Key, Ident Data) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.IdentData[Key] = Data;
+}
+
+/**
+ * Removes a custom data Ident with given Key for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void RemoveCustomDataIdent(Text Id, Text Key) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.IdentData.removekey(Key);
+}
+
+/**
+ * Sets a custom data Nod with given Key and Data for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void SetCustomDataNod(Text Id, Text Key, CNod Data) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.NodData[Key] = Data;
+}
+
+/**
+ * Removes a custom data Nod with given Key for the VirtualPickup with given Id.
+ * Throws an error if there is no entry with the given Id.
+ */
+Void RemoveCustomDataNod(Text Id, Text Key) {
+	assert(G_Pickups.existskey(Id), TL::Replace(C_Error_IdNotFound, "{Id}", Id));
+	G_Pickups[Id].CustomData.NodData.removekey(Key);
+}

@@ -1,0 +1,144 @@
+// #RequireContext CSmMode
+
+#Extends "Libs/Nadeo/TMNext/TrackMania/Modes/TMNextBase.Script.txt"
+
+#Include "Libs/EscapeMania/ModeLibs/EscapeMania/Rooms/Rooms.Script.txt" as Rooms
+#Include "Libs/EscapeMania/ModeLibs/EscapeMania/Rooms/RoomsRequestRespawn.Script.txt" as RoomsRequestRespawn
+
+#Include "Libs/EscapeMania/ModeLibs/EscapeMania/Collisions/Collisions.Script.txt" as Collisions
+
+#Include "Libs/JumpXP/Level.Script.txt" as Level
+
+#Include "Libs/Zrx/ModeLibs/Common/Commands/ModeCommands.Script.txt" as ModeCommands
+
+#Const	CompatibleMapTypes						"Trackmania\\TM_Race,TM_Race,Trackmania\\EscapeManiaArena,EscapeManiaArena"
+#Const	Version												"0.0.1"
+#Const	ScriptName										"Modes/Trackmania/JumpXP.Script.txt"
+
+#Const C_LayerName_ModeCommands "Layer_ModeCommands"
+#Const C_LayerName_Level "Layer_Level"
+
+// 1-10: Speed limit
+// 11-20: Nothing changes
+// 21-30: Reactor Boost 1
+// 31-40: Reactor Boost 2
+
+
+***Match_StartServer***
+***
+Race::UseCppRaceProgression(False);
+
+ModeCommands::AddAdmin("KTaOsd-lTR2zkoskETSfPA"); // vjeux
+
+//Layers::Create(C_LayerName_ModeCommands, ModeCommands::GetManialink());
+//Layers::SetType(C_LayerName_ModeCommands, CUILayer::EUILayerType::Normal);
+//Layers::Attach(C_LayerName_ModeCommands);
+
+Layers::Create(C_LayerName_Level, Level::GetManialink());
+Layers::SetType(C_LayerName_Level, CUILayer::EUILayerType::Normal);
+Layers::Attach(C_LayerName_Level);
+
+Collisions::OnStartServer();
+***
+
+***Match_StartMap***
+***
+Rooms::OnStartMap();
+***
+
+***Match_StartPlayLoop***
+***
+Level::Init();
+***
+
+***Match_LoadItems***
+***
+Level::LoadItems();
+***
+
+Void OnRespawn(CSmPlayer Player, CMapLandmark Location) {
+}
+
+Void OnPlayerSpawn(CSmPlayer Player) {
+	Rooms::OnPlayerSpawn(Player);
+}
+
+Void OnPlayerLeave(CUser User) {
+}
+
+***Match_PlayLoop***
+***
+Level::Loop();
+
+foreach (Player in Players) {
+	if (Player.SpawnStatus == CSmPlayer::ESpawnStatus::NotSpawned) {
+		OnPlayerSpawn(Player);
+	}
+}
+
+foreach (Event in PendingEvents) {
+	switch (Event.Type) {
+		case CSmModeEvent::EType::OnPlayerRequestRespawn: {
+			Level::AddPlayerXP(Event.Player, 342);
+//			if (Event.GiveUp) {
+//				OnRespawn(Event.Player, Null);			
+//			} else {
+//				SetPlayer_Delayed_Cruise(Event.Player, True, 30.0);
+//				SetPlayer_Delayed_BoostUp(Event.Player, True);
+//			}
+		}
+		case CSmModeEvent::EType::OnPlayerAdded: {	
+			UIManager.UIAll.SendChat(Event.Player.User.Name ^ " joined!");
+		}
+		case CSmModeEvent::EType::OnPlayerRemoved: {
+			OnPlayerLeave(Event.User);
+			UIManager.UIAll.SendChat(Event.User.Name ^ " left!");
+		}
+		case CSmModeEvent::EType::OnPlayerTriggersWaypoint: {
+			Level::AddPlayerXP(Event.Player, 342);
+		}
+	}
+}
+
+
+foreach (Event in Level::GetEvents()) {
+	switch (Event.Type) {
+		case "Level_Up": {
+			declare Text DossardPrefix = "";
+			if (Event.Level < 10) {
+				DossardPrefix = "0";
+			}
+			Event.Player.Dossard_Number = DossardPrefix ^ Event.Level;
+			Event.Player.ForceModelId = Level::GetSkin(Event.Level);
+//			UnspawnPlayer(Event.Player);
+		}
+	}
+}
+
+foreach (Command in ModeCommands::GetPendingCommands()) {
+  switch (Command.Name) {
+		case "Command_restart": {
+			assert(False);
+		}
+  }
+}
+
+Level::Loop();
+Rooms::Loop();
+
+foreach (Player => HasRequest in RoomsRequestRespawn::GetRequests()) {
+	if (HasRequest) {
+		OnRespawn(Player, RoomsRequestRespawn::GetRequestsLocation().get(Player, Null));
+	}
+}
+RoomsRequestRespawn::Reset();
+***
+
+
+***Match_Yield***
+***
+ModeCommands::Yield();
+***
+
+
+Void DoNothing() {}

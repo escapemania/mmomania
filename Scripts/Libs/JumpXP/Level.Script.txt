@@ -1,0 +1,315 @@
+#Include "TextLib" as TL
+
+#Struct K_LevelAndXP {
+	Integer Level;
+	Integer XP;
+	Integer NextLevelXP;
+}
+
+#Struct K_Event {
+	Text Type;
+	CSmPlayer Player;
+	Integer Level;
+}
+
+declare Integer[Text] G_CurrentXP;
+declare Integer[] G_XP_Per_Level;
+declare K_Event[] G_Events;
+declare Ident[] G_Skins;
+
+Void Init() {
+	G_XP_Per_Level = [
+		400, // 1
+		900, // 2
+		1400, // 3
+		2100, // 4
+		2800, // 5
+		3600, // 6
+		4500, // 7
+		5400, // 8
+		6500, // 9
+		7600, // 10
+		8700, // 11
+		9800, // 12
+		11000, // 13
+		12300, // 14
+		13600, // 15
+		15000, // 16
+		16400, // 17
+		17800, // 18
+		19300, // 19
+		20800, // 20
+		22400, // 21
+		24000, // 22
+		25500, // 23
+		27200, // 24
+		28900, // 25
+		30500, // 26
+		32200, // 27
+		33900, // 28
+		36300, // 29
+		38800, // 30
+		41600, // 31
+		44600, // 32
+		48000, // 33
+		51400, // 34
+		55000, // 35
+		58700, // 36
+		62400, // 37
+		66200, // 38
+		70200, // 39
+		74300, // 40
+		78500, // 41
+		82800, // 42
+		87100, // 43
+		91600, // 44
+		96300, // 45
+		101000, // 46
+		105800, // 47
+		110700, // 48
+		115700, // 49
+		120900, // 50
+		126100, // 51
+		131500, // 52
+		137000, // 53
+		142500, // 54
+		148200, // 55
+		154000, // 56
+		159900, // 57
+		165800, // 58
+		172000, // 59
+		290000 // 60	
+	];
+}
+
+Ident GetSkin(Integer Level) {
+	return G_Skins[Level - 1];
+}
+
+Void LoadItems() {
+	declare Text[] Skins = [
+		"Clan_bee", // 1
+		"Clan_butterfly",
+		"Clan_clown_fish",
+		"Clan_crocodile",
+		"Clan_dolphin",
+		"Clan_flamingo",
+		"Clan_fox",
+		"Clan_giraffe",
+		"Clan_grasshopper",
+		"Clan_kangaroo", // 10
+		"Clan_ladybug",
+		"Clan_macaw_parrot",
+		"Clan_monkey",
+		"Clan_octopus",
+		"Clan_panda",
+		"Clan_peafowl",
+		"Clan_pig",
+		"Clan_polar_bear",
+		"Clan_rabbit",
+		"Clan_zebra", // 20
+		"AFG",
+		"ALB",
+		"ALG",
+		"AND",
+		"ANG",
+		"ARG",
+		"ARM",
+		"AUS",
+		"AUT",
+		"AZE", // 30
+		"BAH",
+		"BAN",
+		"BEL",
+		"BIH",
+		"BLR",
+		"BOL",
+		"BRA",
+		"BRN",
+		"BUL",
+		"CAM" // 40
+/*		"CAN",
+		"CGO",
+		"CHI",
+		"CHN",
+		"CIV",
+		"CMR",
+		"COD",
+		"COL",
+		"CRC",
+		"CRO",
+		"CUB",
+		"CYP",
+		"CZE",
+		"DEN",
+		"ECU",
+		"EGY",
+		"ESP",
+		"EST",
+		"FIN",
+		"FRA",
+		"GAB",
+		"GBR",
+		"GEO",
+		"GER",
+		"GRE",
+		"GUA",
+		"HON",
+		"HUN",
+		"INA",
+		"IND",
+		"IRI",
+		"IRL",
+		"IRQ",
+		"ISL",
+		"ISR",
+		"ITA",
+		"JAM",
+		"JOR",
+		"JPN",
+		"KAZ",
+		"KOR",
+		"KSA",
+		"KUW",
+		"LAT",
+		"LBA",
+		"LIB",
+		"LIE",
+		"LTU",
+		"LUX",
+		"MAD",
+		"MAR",
+		"MAS",
+		"MDA",
+		"MEX",
+		"MGL",
+		"MKD",
+		"MLI",
+		"MLT",
+		"MNE",
+		"NED",
+		"NGR",
+		"NOR",
+		"NZL",
+		"PAK",
+		"PAN",
+		"PAR",
+		"PER",
+		"PHI",
+		"POL",
+		"POR",
+		"QAT",
+		"ROU",
+		"RSA",
+		"RUS",
+		"SEN",
+		"SGP",
+		"SLO",
+		"SRB",
+		"SUI",
+		"SVK",
+		"SWE",
+		"SYR",
+		"THA",
+		"TUN",
+		"TUR",
+		"UAE",
+		"UKR",
+		"URU",
+		"USA",
+		"UZB",
+		"VEN",
+		"VIE" */
+	];
+
+	foreach (Skin in Skins) {
+		G_Skins.add(ItemList_AddWithSkin("CarSport", "Skins/Models/CarSport/Stadium_" ^ Skin ^ ".zip"));
+	}
+}
+
+K_Event[] GetEvents() {
+	return G_Events;
+}
+
+K_LevelAndXP GetPlayerLevelAndRemainingXP(CSmPlayer Player) {
+	declare Integer Result_XP = G_CurrentXP.get(Player.User.Login, 0);
+	declare Integer Result_Level = 1;
+	declare Integer Result_NextLevelXP = 0;
+	foreach (NextLevelXP in G_XP_Per_Level) {
+		if (Result_XP >= NextLevelXP) {
+			Result_Level += 1;
+			Result_XP -= NextLevelXP;
+		} else {
+			Result_NextLevelXP = NextLevelXP;
+			break;
+		}
+	}	
+	return K_LevelAndXP { Level = Result_Level, XP = Result_XP, NextLevelXP = Result_NextLevelXP };
+}
+
+Integer GetPlayerLevel(CSmPlayer Player) {
+	return GetPlayerLevelAndRemainingXP(Player).Level;
+}
+
+Void AddPlayerXP(CSmPlayer Player, Integer XP) {
+	if (!G_CurrentXP.existskey(Player.User.Login)) {
+		G_CurrentXP[Player.User.Login] = 0;
+	}
+	declare PreviousLevel = GetPlayerLevel(Player);
+	G_CurrentXP[Player.User.Login] += XP;
+	declare NextLevel = GetPlayerLevel(Player);
+
+	if (NextLevel > PreviousLevel) {
+		while (PreviousLevel < NextLevel) {
+			G_Events.add(K_Event {
+				Type = "Level_Up",
+				Player = Player,
+				Level = PreviousLevel + 1
+			});
+			PreviousLevel += 1;
+		}
+	}
+}
+
+Void Loop() {
+	G_Events = [];
+	foreach (Player in Players) {
+		declare netwrite K_LevelAndXP LevelAndXP for Player;
+		LevelAndXP = GetPlayerLevelAndRemainingXP(Player);
+	}
+}
+
+Text GetManialink() {
+	return """
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<manialink version="3" name="Level">
+	<quad z-index="2" size="100 2" opacity="0.8" halign="left" valign="top" bgcolor="000" pos="-50 80" id="level-xp-bg"/>
+	<quad z-index="3" size="40 2" halign="left" valign="top" bgcolor="03c" pos="-50 80" id="level-xp-fg"/>
+
+	<label z-index="2" text="" halign="center" textfont="GameFontBlack" textsize="5" valign="center2" pos="0 73" id="level-level"/>
+
+	<script><!--	
+	#Struct K_LevelAndXP {
+		Integer Level;
+		Integer XP;
+		Integer NextLevelXP;
+	}
+
+	main() {
+		declare CMlLabel LevelLabel = (Page.GetFirstChild("level-level") as CMlLabel);
+		declare CMlLabel XPQuad = (Page.GetFirstChild("level-xp-fg") as CMlLabel);
+		
+		while (True) {
+			yield;
+			
+			if (GUIPlayer != Null) {
+				declare netread K_LevelAndXP LevelAndXP for GUIPlayer;
+				LevelLabel.Value = "Level " ^ LevelAndXP.Level;
+				XPQuad.Size = <((1.0 * LevelAndXP.XP) / (1.0 * LevelAndXP.NextLevelXP)) * 100.0, 2.0>;
+			}
+		}
+	}
+	--></script>
+</manialink>
+	""";
+}
